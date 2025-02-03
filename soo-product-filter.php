@@ -496,14 +496,14 @@ class Soo_Product_Filter_Widget extends WP_Widget {
 	 */
 	protected function get_filter_options( $filter ) {
 		$options = array();
-
+	
 		switch ( $filter['source'] ) {
 			case 'price':
 				// Find min and max price in current result set
 				$prices = $this->get_filtered_price();
 				$min    = floor( $prices->min_price );
 				$max    = ceil( $prices->max_price );
-
+	
 				/**
 				 * Adjust max if the store taxes are not displayed how they are stored.
 				 * Min is left alone because the product may not be taxable.
@@ -512,42 +512,68 @@ class Soo_Product_Filter_Widget extends WP_Widget {
 				if ( wc_tax_enabled() && 'incl' === get_option( 'woocommerce_tax_display_shop' ) && ! wc_prices_include_tax() ) {
 					$tax_classes = array_merge( array( '' ), WC_Tax::get_tax_classes() );
 					$class_max   = $max;
-
+	
 					foreach ( $tax_classes as $tax_class ) {
 						if ( $tax_rates = WC_Tax::get_rates( $tax_class ) ) {
 							$class_max = $max + WC_Tax::get_tax_total( WC_Tax::calc_exclusive_tax( $max, $tax_rates ) );
 						}
 					}
-
+	
 					$max = $class_max;
 				}
 				$options['min'] = $min;
 				$options['max'] = $max;
-
 				break;
-
+	
 			case 'category':
 			case 'tag':
-				$taxonomy = 'category' == $filter['source'] ? 'product_cat' : 'product_tag';
-				$terms    = get_terms( array( 'taxonomy' => $taxonomy, 'hide_empty' => false ) );
-
+				$taxonomy = ( $filter['source'] === 'category' ) ? 'product_cat' : 'product_tag';
+				$terms = get_terms( array(
+					'taxonomy'   => $taxonomy,
+					'hide_empty' => false, // Get all categories
+				) );
+	
 				foreach ( $terms as $term ) {
-					$options[ $term->slug ] = array(
-						'name'  => $term->name,
-						'count' => $term->count,
-						'id'    => $term->term_id,
-					);
+					// Check if there is a product in the category
+					$query = new WP_Query( array(
+						'post_type'      => 'product',
+						'posts_per_page' => 1, // Show if there is at least 1 product
+						'tax_query'      => array(
+							array(
+								'taxonomy' => $taxonomy,
+								'field'    => 'slug',
+								'terms'    => $term->slug,
+							),
+						),
+						'meta_query'     => array(
+							array(
+								'key'     => '_stock_status',
+								'value'   => 'instock', // Exclude out of stock products
+								'compare' => '=',
+							),
+						),
+					));
+	
+					if ( $query->have_posts() ) {
+						$options[ $term->slug ] = array(
+							'name'  => $term->name,
+							'count' => $term->count,
+							'id'    => $term->term_id,
+						);
+					}
+	
+					wp_reset_postdata();
 				}
 				break;
-
+	
 			case 'attribute':
 				$taxonomy = 'pa_' . $filter['attribute'];
 				$terms    = get_terms( array( 'taxonomy' => $taxonomy, 'hide_empty' => false ) );
-
+	
 				if ( is_wp_error( $terms ) ) {
 					break;
 				}
-
+	
 				foreach ( $terms as $term ) {
 					$options[ $term->slug ] = array(
 						'name'  => $term->name,
@@ -557,7 +583,7 @@ class Soo_Product_Filter_Widget extends WP_Widget {
 				}
 				break;
 		}
-
+	
 		return apply_filters( 'soopf_filter_options', $options, $filter );
 	}
 
